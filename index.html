@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Inventario_equipos_colegio_cristo_rey_bogota</title>
+<title>Registro de Equipos — Colegio Cristo Rey</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
 
@@ -231,6 +231,17 @@
 </div>
 <button id="logout-btn" style="display:none;" onclick="doLogout()">Cerrar sesión</button>
 
+<div id="setpass-screen" style="display:none;position:fixed;inset:0;background:var(--paper);z-index:101;align-items:center;justify-content:center;padding:20px;">
+  <div class="login-box">
+    <h2>Crea tu contraseña</h2>
+    <div class="sub">Es la primera vez que entras — elige tu contraseña</div>
+    <input type="password" id="setpass-1" placeholder="Nueva contraseña (mín. 6 caracteres)">
+    <input type="password" id="setpass-2" placeholder="Repite la contraseña">
+    <button onclick="doSetPassword()">Guardar y entrar</button>
+    <div class="login-error" id="setpass-error">Las contraseñas no coinciden o son muy cortas.</div>
+  </div>
+</div>
+
 <div class="wrap">
   <header>
     <div class="header-row">
@@ -399,10 +410,36 @@ function onLoggedIn(){
   });
 }
 
+async function doSetPassword(){
+  const p1 = document.getElementById('setpass-1').value;
+  const p2 = document.getElementById('setpass-2').value;
+  const errBox = document.getElementById('setpass-error');
+  errBox.style.display = 'none';
+  if(p1.length < 6 || p1 !== p2){
+    errBox.style.display = 'block';
+    return;
+  }
+  const { error } = await supabaseClient.auth.updateUser({ password: p1 });
+  if(error){
+    errBox.textContent = 'No se pudo guardar: ' + error.message;
+    errBox.style.display = 'block';
+    return;
+  }
+  document.getElementById('setpass-screen').style.display = 'none';
+  onLoggedIn();
+}
+
 async function checkAuth(){
+  const hash = window.location.hash;
+  const isInviteFlow = hash.includes('type=invite') || hash.includes('type=recovery');
   const { data } = await supabaseClient.auth.getSession();
   if(data && data.session){
-    onLoggedIn();
+    if(isInviteFlow){
+      document.getElementById('login-screen').style.display = 'none';
+      document.getElementById('setpass-screen').style.display = 'flex';
+    } else {
+      onLoggedIn();
+    }
   } else {
     document.getElementById('login-screen').style.display = 'flex';
   }
