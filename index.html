@@ -70,6 +70,8 @@
   .badge.mantenimiento{background:#EAE3F2;color:var(--purple);}
   .badge.danado{background:#F5E1DE;color:var(--red);}
   .badge.baja{background:#E8E8E8;color:var(--gris);}
+  .badge.traslado{background:#DCEAF5;color:var(--azul-dark);}
+  .badge.ajuste{background:#ECECEC;color:var(--ink);}
   .card-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-end;}
 
   .empty{text-align:center;padding:50px 20px;color:#7a7f77;border:1px dashed var(--line);border-radius:5px;}
@@ -143,30 +145,81 @@
 
   <div class="tabs">
     <div class="tab active" data-tab="bienes">Inventario</div>
-    <div class="tab soon" title="Próximamente">Movimientos</div>
+    <div class="tab" data-tab="movimientos">Movimientos</div>
     <div class="tab soon" title="Próximamente">Préstamos</div>
     <div class="tab soon" title="Próximamente">Levantamientos</div>
   </div>
 
-  <div class="toolbar">
-    <input id="search" placeholder="Buscar por descripción, placa o acta de compra…">
-    <div class="filters">
-      <select id="f-ubicacion"><option value="">Todas las ubicaciones</option></select>
-      <select id="f-categoria"><option value="">Todas las categorías</option></select>
-      <select id="f-estado">
-        <option value="">Todos los estados</option>
-        <option value="disponible">Disponible</option>
-        <option value="prestado">Prestado</option>
-        <option value="mantenimiento">Mantenimiento</option>
-        <option value="danado">Dañado</option>
-        <option value="baja">De baja</option>
-      </select>
+  <div id="view-bienes">
+    <div class="toolbar">
+      <input id="search" placeholder="Buscar por descripción, placa o acta de compra…">
+      <div class="filters">
+        <select id="f-ubicacion"><option value="">Todas las ubicaciones</option></select>
+        <select id="f-categoria"><option value="">Todas las categorías</option></select>
+        <select id="f-estado">
+          <option value="">Todos los estados</option>
+          <option value="disponible">Disponible</option>
+          <option value="prestado">Prestado</option>
+          <option value="mantenimiento">Mantenimiento</option>
+          <option value="danado">Dañado</option>
+          <option value="baja">De baja</option>
+        </select>
+      </div>
+      <button onclick="openBienModal()">+ Nuevo bien</button>
     </div>
-    <button onclick="openBienModal()">+ Nuevo bien</button>
+
+    <div class="count" id="count"></div>
+    <div id="bienes-list"></div>
   </div>
 
-  <div class="count" id="count"></div>
-  <div id="bienes-list"></div>
+  <div id="view-movimientos" style="display:none;">
+    <div class="toolbar">
+      <select id="m-f-bien"><option value="">Todos los bienes</option></select>
+      <select id="m-f-tipo">
+        <option value="">Todos los tipos</option>
+        <option value="traslado">Traslado</option>
+        <option value="ajuste">Ajuste</option>
+        <option value="mantenimiento">Mantenimiento</option>
+        <option value="baja">Baja</option>
+      </select>
+      <button onclick="openMovModal()">+ Nuevo movimiento</button>
+    </div>
+    <div class="count" id="mov-count"></div>
+    <div id="movimientos-list"></div>
+  </div>
+</div>
+
+<!-- Modal: nuevo movimiento -->
+<div class="modal-bg" id="mov-modal-bg">
+  <div class="modal">
+    <h2>Nuevo movimiento</h2>
+    <div class="field">
+      <label>Bien *</label>
+      <select id="m-bien"></select>
+    </div>
+    <div class="field">
+      <label>Tipo de movimiento *</label>
+      <select id="m-tipo">
+        <option value="traslado">Traslado (cambia de ubicación)</option>
+        <option value="mantenimiento">Entra a mantenimiento</option>
+        <option value="baja">Dar de baja</option>
+        <option value="ajuste">Ajuste / nota (sin cambiar estado)</option>
+      </select>
+    </div>
+    <div class="field" id="m-destino-row">
+      <label>Nueva ubicación *</label>
+      <select id="m-destino"></select>
+    </div>
+    <div class="field">
+      <label>Observación</label>
+      <textarea id="m-obs" rows="2" placeholder="Ej. Se traslada para la clase de informática"></textarea>
+    </div>
+    <div class="err" id="mov-err"></div>
+    <div class="modal-actions">
+      <button class="ghost" onclick="closeMovModal()">Cancelar</button>
+      <button onclick="saveMovimiento()">Guardar</button>
+    </div>
+  </div>
 </div>
 
 <!-- Modal: crear / editar bien -->
@@ -607,6 +660,138 @@ async function saveEstado(){
 
   closeEstadoModal();
   await loadBienes();
+}
+
+// ---------- Tabs ----------
+
+document.querySelectorAll('.tab[data-tab]').forEach(t => {
+  t.addEventListener('click', () => switchTab(t.dataset.tab));
+});
+
+function switchTab(tab){
+  document.querySelectorAll('.tab[data-tab]').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.getElementById('view-bienes').style.display = tab === 'bienes' ? 'block' : 'none';
+  document.getElementById('view-movimientos').style.display = tab === 'movimientos' ? 'block' : 'none';
+  if(tab === 'movimientos') loadMovimientos();
+}
+
+// ---------- Movimientos ----------
+
+let movimientos = [];
+
+function ubicNombre(id){
+  const u = ubicaciones.find(x => x.id === id);
+  return u ? u.nombre : '—';
+}
+
+function tipoLabel(t){
+  return { traslado:'Traslado', baja:'Baja', ajuste:'Ajuste', mantenimiento:'Mantenimiento' }[t] || t;
+}
+
+async function loadMovimientos(){
+  const bienOptions = bienes.map(b => ({ id: b.id, nombre: b.descripcion + (b.placa_serial ? ' (' + b.placa_serial + ')' : '') }));
+  fillSelect('m-f-bien', bienOptions, true, 'Todos los bienes');
+  fillSelect('m-bien', bienOptions, false);
+  fillSelect('m-destino', ubicaciones, false);
+
+  const { data, error } = await supabaseClient
+    .from('movimientos')
+    .select('*, bienes(descripcion, placa_serial), usuarios(correo, personas(nombre))')
+    .order('fecha_hora', { ascending: false });
+  if(error){ console.error(error); return; }
+  movimientos = data || [];
+  renderMovimientos();
+}
+
+function renderMovimientos(){
+  const fBien = document.getElementById('m-f-bien').value;
+  const fTipo = document.getElementById('m-f-tipo').value;
+
+  const filtrados = movimientos.filter(m => {
+    if(fBien && String(m.bien_id) !== fBien) return false;
+    if(fTipo && m.tipo !== fTipo) return false;
+    return true;
+  });
+
+  const list = document.getElementById('movimientos-list');
+  document.getElementById('mov-count').textContent = `${filtrados.length} movimiento(s)`;
+
+  if(filtrados.length === 0){
+    list.innerHTML = '<div class="empty">No hay movimientos registrados todavía.</div>';
+    return;
+  }
+
+  list.innerHTML = filtrados.map(m => `
+    <div class="card">
+      <div class="card-body">
+        <div class="card-title">${escapeHtml(m.bienes?.descripcion || 'Bien eliminado')} ${m.bienes?.placa_serial ? '(' + escapeHtml(m.bienes.placa_serial) + ')' : ''}</div>
+        <div class="card-meta">
+          🕒 ${new Date(m.fecha_hora).toLocaleString('es-CO')} &nbsp;·&nbsp;
+          👤 ${escapeHtml(m.usuarios?.personas?.nombre || m.usuarios?.correo || '—')}
+          ${m.tipo === 'traslado' ? `<br>📍 ${escapeHtml(ubicNombre(m.ubicacion_origen_id))} → ${escapeHtml(ubicNombre(m.ubicacion_destino_id))}` : ''}
+          ${m.observacion ? `<br>📝 ${escapeHtml(m.observacion)}` : ''}
+        </div>
+        <span class="badge ${m.tipo}">${tipoLabel(m.tipo)}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+['m-f-bien','m-f-tipo'].forEach(id => document.getElementById(id).addEventListener('change', renderMovimientos));
+
+document.getElementById('m-tipo').addEventListener('change', e => {
+  document.getElementById('m-destino-row').style.display = e.target.value === 'traslado' ? 'flex' : 'none';
+});
+
+function openMovModal(){
+  document.getElementById('mov-err').classList.remove('show');
+  document.getElementById('m-tipo').value = 'traslado';
+  document.getElementById('m-destino-row').style.display = 'flex';
+  document.getElementById('m-obs').value = '';
+  if(bienes.length) document.getElementById('m-bien').value = bienes[0].id;
+  document.getElementById('mov-modal-bg').classList.add('open');
+}
+
+function closeMovModal(){
+  document.getElementById('mov-modal-bg').classList.remove('open');
+}
+
+async function saveMovimiento(){
+  const errBox = document.getElementById('mov-err');
+  errBox.classList.remove('show');
+
+  const bienId = document.getElementById('m-bien').value;
+  const tipo = document.getElementById('m-tipo').value;
+  const destino = document.getElementById('m-destino').value;
+  const obs = document.getElementById('m-obs').value.trim();
+  const b = bienes.find(x => x.id == bienId);
+
+  if(!bienId || !b){ errBox.textContent = 'Selecciona un bien.'; errBox.classList.add('show'); return; }
+  if(tipo === 'traslado' && !destino){ errBox.textContent = 'Selecciona la nueva ubicación.'; errBox.classList.add('show'); return; }
+
+  const payload = {
+    bien_id: bienId,
+    tipo,
+    usuario_id: currentUsuario ? currentUsuario.id : null,
+    ubicacion_origen_id: b.ubicacion_id,
+    ubicacion_destino_id: tipo === 'traslado' ? destino : b.ubicacion_id,
+    observacion: obs || null,
+  };
+
+  const { error } = await supabaseClient.from('movimientos').insert(payload);
+  if(error){ errBox.textContent = error.message; errBox.classList.add('show'); return; }
+
+  const cambios = {};
+  if(tipo === 'traslado') cambios.ubicacion_id = destino;
+  if(tipo === 'baja') cambios.estado = 'baja';
+  if(tipo === 'mantenimiento') cambios.estado = 'mantenimiento';
+  if(Object.keys(cambios).length){
+    await supabaseClient.from('bienes').update(cambios).eq('id', bienId);
+  }
+
+  closeMovModal();
+  await loadBienes();
+  await loadMovimientos();
 }
 </script>
 </body>
