@@ -72,6 +72,9 @@
   .badge.baja{background:#E8E8E8;color:var(--gris);}
   .badge.traslado{background:#DCEAF5;color:var(--azul-dark);}
   .badge.ajuste{background:#ECECEC;color:var(--ink);}
+  .badge.devuelto{background:#E4EFE8;color:var(--green);}
+  .badge.vencido{background:#F5E1DE;color:var(--red);}
+  .badge.perdido{background:#2A2A2A;color:#F2F2F2;}
   .card-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-end;}
 
   .empty{text-align:center;padding:50px 20px;color:#7a7f77;border:1px dashed var(--line);border-radius:5px;}
@@ -146,7 +149,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="bienes">Inventario</div>
     <div class="tab" data-tab="movimientos">Movimientos</div>
-    <div class="tab soon" title="Próximamente">Préstamos</div>
+    <div class="tab" data-tab="prestamos">Préstamos</div>
     <div class="tab soon" title="Próximamente">Levantamientos</div>
   </div>
 
@@ -186,6 +189,98 @@
     </div>
     <div class="count" id="mov-count"></div>
     <div id="movimientos-list"></div>
+  </div>
+
+  <div id="view-prestamos" style="display:none;">
+    <div class="toolbar">
+      <select id="p-f-estado">
+        <option value="">Todos los estados</option>
+        <option value="prestado">Prestado</option>
+        <option value="devuelto">Devuelto</option>
+        <option value="vencido">Vencido</option>
+        <option value="perdido">Perdido</option>
+      </select>
+      <button onclick="openPrestamoModal()">+ Nuevo préstamo</button>
+    </div>
+    <div class="count" id="p-count"></div>
+    <div id="prestamos-list"></div>
+  </div>
+</div>
+
+<!-- Modal: nuevo préstamo -->
+<div class="modal-bg" id="prestamo-modal-bg">
+  <div class="modal">
+    <h2>Nuevo préstamo</h2>
+    <div class="field">
+      <label>Bien *</label>
+      <select id="p-bien"></select>
+    </div>
+    <div class="field">
+      <label>Solicitante *</label>
+      <select id="p-solicitante"></select>
+      <div class="inline-add" id="per-add-row" style="display:none;">
+        <input id="per-add-nombre" placeholder="Nombre">
+        <input id="per-add-cargo" placeholder="Cargo">
+        <button class="small ghost" onclick="addPersona()">Agregar</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Cargo del solicitante (en este momento)</label>
+      <input id="p-cargo" placeholder="Ej. Docente de Primaria">
+    </div>
+    <div class="field">
+      <label>¿A dónde va el bien? (opcional)</label>
+      <select id="p-destino"><option value="">Sin especificar</option></select>
+    </div>
+    <div class="field">
+      <label>Devolución esperada (opcional)</label>
+      <input id="p-fecha-esp" type="datetime-local">
+    </div>
+    <div class="field">
+      <label>Condición al salir</label>
+      <input id="p-condicion-salida" placeholder="Ej. Buen estado, cargador incluido">
+    </div>
+    <div class="field">
+      <label>Observaciones</label>
+      <textarea id="p-obs" rows="2"></textarea>
+    </div>
+    <div class="err" id="prestamo-err"></div>
+    <div class="modal-actions">
+      <button class="ghost" onclick="closePrestamoModal()">Cancelar</button>
+      <button onclick="savePrestamo()">Guardar préstamo</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: devolver préstamo -->
+<div class="modal-bg" id="devolucion-modal-bg">
+  <div class="modal">
+    <h2>Registrar devolución</h2>
+    <input type="hidden" id="d-id">
+    <div class="field">
+      <label>Bien</label>
+      <div id="d-bien-desc" style="font-size:14px;font-weight:600;"></div>
+    </div>
+    <div class="field">
+      <label>Resultado *</label>
+      <select id="d-estado">
+        <option value="devuelto">Devuelto normalmente</option>
+        <option value="perdido">Perdido / no devuelto</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Condición al volver</label>
+      <input id="d-condicion-entrada" placeholder="Ej. Buen estado">
+    </div>
+    <div class="field">
+      <label>Observaciones</label>
+      <textarea id="d-obs" rows="2"></textarea>
+    </div>
+    <div class="err" id="devolucion-err"></div>
+    <div class="modal-actions">
+      <button class="ghost" onclick="closeDevolucionModal()">Cancelar</button>
+      <button onclick="saveDevolucion()">Confirmar</button>
+    </div>
   </div>
 </div>
 
@@ -672,7 +767,204 @@ function switchTab(tab){
   document.querySelectorAll('.tab[data-tab]').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.getElementById('view-bienes').style.display = tab === 'bienes' ? 'block' : 'none';
   document.getElementById('view-movimientos').style.display = tab === 'movimientos' ? 'block' : 'none';
+  document.getElementById('view-prestamos').style.display = tab === 'prestamos' ? 'block' : 'none';
   if(tab === 'movimientos') loadMovimientos();
+  if(tab === 'prestamos') loadPrestamos();
+}
+
+// ---------- Préstamos ----------
+
+let prestamos = [];
+let personas = [];
+
+function prestamoEstadoLabel(e){
+  return { prestado:'Prestado', devuelto:'Devuelto', vencido:'Vencido', perdido:'Perdido' }[e] || e;
+}
+
+async function loadPersonas(){
+  const { data, error } = await supabaseClient.from('personas').select('*').order('nombre');
+  if(error){ console.error(error); return; }
+  personas = data || [];
+  fillSelect('p-solicitante', personas, false);
+  appendAddOption('p-solicitante');
+}
+
+document.getElementById('p-solicitante').addEventListener('change', e => {
+  document.getElementById('per-add-row').style.display = e.target.value === '__add__' ? 'flex' : 'none';
+  const persona = personas.find(x => String(x.id) === e.target.value);
+  document.getElementById('p-cargo').value = persona ? (persona.cargo || '') : '';
+});
+
+async function addPersona(){
+  const nombre = document.getElementById('per-add-nombre').value.trim();
+  const cargo = document.getElementById('per-add-cargo').value.trim() || null;
+  if(!nombre) return;
+  const { data, error } = await supabaseClient.from('personas').insert({ nombre, cargo }).select().single();
+  if(error){ alert('No se pudo agregar la persona: ' + error.message); return; }
+  personas.push(data);
+  personas.sort((a,b) => a.nombre.localeCompare(b.nombre));
+  fillSelect('p-solicitante', personas, false);
+  appendAddOption('p-solicitante');
+  document.getElementById('p-solicitante').value = data.id;
+  document.getElementById('p-cargo').value = data.cargo || '';
+  document.getElementById('per-add-row').style.display = 'none';
+  document.getElementById('per-add-nombre').value = '';
+  document.getElementById('per-add-cargo').value = '';
+}
+
+async function loadPrestamos(){
+  await loadPersonas();
+
+  const bienesDisponibles = bienes.filter(b => b.estado === 'disponible' && b.cantidad === 1);
+  fillSelect('p-bien', bienesDisponibles.map(b => ({ id: b.id, nombre: b.descripcion + (b.placa_serial ? ' (' + b.placa_serial + ')' : '') })), false);
+  fillSelect('p-destino', ubicaciones, true, 'Sin especificar');
+
+  const { data, error } = await supabaseClient
+    .from('prestamos')
+    .select('*, bienes(descripcion, placa_serial), personas(nombre)')
+    .order('fecha_hora_salida', { ascending: false });
+  if(error){ console.error(error); return; }
+  prestamos = data || [];
+  renderPrestamos();
+}
+
+function renderPrestamos(){
+  const fEstado = document.getElementById('p-f-estado').value;
+  const filtrados = prestamos.filter(p => !fEstado || p.estado === fEstado);
+
+  const list = document.getElementById('prestamos-list');
+  document.getElementById('p-count').textContent = `${filtrados.length} préstamo(s)`;
+
+  if(filtrados.length === 0){
+    list.innerHTML = '<div class="empty">No hay préstamos registrados todavía.</div>';
+    return;
+  }
+
+  list.innerHTML = filtrados.map(p => `
+    <div class="card">
+      <div class="card-body">
+        <div class="card-title">${escapeHtml(p.bienes?.descripcion || 'Bien eliminado')} ${p.bienes?.placa_serial ? '(' + escapeHtml(p.bienes.placa_serial) + ')' : ''}</div>
+        <div class="card-meta">
+          👤 ${escapeHtml(p.personas?.nombre || '—')}${p.cargo_solicitante ? ' · ' + escapeHtml(p.cargo_solicitante) : ''}<br>
+          🕒 Salida: ${new Date(p.fecha_hora_salida).toLocaleString('es-CO')}
+          ${p.fecha_hora_devolucion_esp ? `<br>📅 Devolución esperada: ${new Date(p.fecha_hora_devolucion_esp).toLocaleString('es-CO')}` : ''}
+          ${p.fecha_hora_devolucion_real ? `<br>✅ Devuelto: ${new Date(p.fecha_hora_devolucion_real).toLocaleString('es-CO')}` : ''}
+          ${p.observaciones ? `<br>📝 ${escapeHtml(p.observaciones)}` : ''}
+        </div>
+        <span class="badge ${p.estado}">${prestamoEstadoLabel(p.estado)}</span>
+      </div>
+      <div class="card-actions">
+        ${p.estado === 'prestado' ? `<button class="small ghost" onclick="openDevolucionModal(${p.id})">Registrar devolución</button>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+document.getElementById('p-f-estado').addEventListener('change', renderPrestamos);
+
+function openPrestamoModal(){
+  document.getElementById('prestamo-err').classList.remove('show');
+  document.getElementById('per-add-row').style.display = 'none';
+  document.getElementById('p-cargo').value = '';
+  document.getElementById('p-fecha-esp').value = '';
+  document.getElementById('p-condicion-salida').value = '';
+  document.getElementById('p-obs').value = '';
+  const bienesDisponibles = bienes.filter(b => b.estado === 'disponible' && b.cantidad === 1);
+  if(bienesDisponibles.length === 0){
+    alert('No hay bienes individuales disponibles para prestar en este momento.');
+    return;
+  }
+  document.getElementById('prestamo-modal-bg').classList.add('open');
+}
+
+function closePrestamoModal(){
+  document.getElementById('prestamo-modal-bg').classList.remove('open');
+}
+
+async function savePrestamo(){
+  const errBox = document.getElementById('prestamo-err');
+  errBox.classList.remove('show');
+
+  const bienId = document.getElementById('p-bien').value;
+  const solicitanteId = document.getElementById('p-solicitante').value;
+  const cargo = document.getElementById('p-cargo').value.trim() || null;
+  const destino = document.getElementById('p-destino').value || null;
+  const fechaEsp = document.getElementById('p-fecha-esp').value || null;
+  const condicionSalida = document.getElementById('p-condicion-salida').value.trim() || null;
+  const obs = document.getElementById('p-obs').value.trim() || null;
+
+  if(!bienId || !solicitanteId || solicitanteId === '__add__'){
+    errBox.textContent = 'Selecciona el bien y el solicitante.';
+    errBox.classList.add('show');
+    return;
+  }
+  if(!currentUsuario){
+    errBox.textContent = 'No se pudo identificar tu usuario. Cierra sesión y vuelve a entrar.';
+    errBox.classList.add('show');
+    return;
+  }
+
+  const payload = {
+    bien_id: bienId,
+    solicitante_id: solicitanteId,
+    cargo_solicitante: cargo,
+    autorizado_por_id: currentUsuario.id,
+    ubicacion_destino_id: destino,
+    fecha_hora_devolucion_esp: fechaEsp,
+    condicion_salida: condicionSalida,
+    observaciones: obs,
+    estado: 'prestado',
+  };
+
+  const { error } = await supabaseClient.from('prestamos').insert(payload);
+  if(error){ errBox.textContent = error.message; errBox.classList.add('show'); return; }
+
+  await supabaseClient.from('bienes').update({ estado: 'prestado' }).eq('id', bienId);
+
+  closePrestamoModal();
+  await loadBienes();
+  await loadPrestamos();
+}
+
+function openDevolucionModal(id){
+  const p = prestamos.find(x => x.id === id);
+  if(!p) return;
+  document.getElementById('devolucion-err').classList.remove('show');
+  document.getElementById('d-id').value = id;
+  document.getElementById('d-bien-desc').textContent = (p.bienes?.descripcion || '') + (p.bienes?.placa_serial ? ' (' + p.bienes.placa_serial + ')' : '');
+  document.getElementById('d-estado').value = 'devuelto';
+  document.getElementById('d-condicion-entrada').value = '';
+  document.getElementById('d-obs').value = '';
+  document.getElementById('devolucion-modal-bg').classList.add('open');
+}
+
+function closeDevolucionModal(){
+  document.getElementById('devolucion-modal-bg').classList.remove('open');
+}
+
+async function saveDevolucion(){
+  const errBox = document.getElementById('devolucion-err');
+  errBox.classList.remove('show');
+
+  const id = document.getElementById('d-id').value;
+  const estado = document.getElementById('d-estado').value;
+  const condicionEntrada = document.getElementById('d-condicion-entrada').value.trim() || null;
+  const obs = document.getElementById('d-obs').value.trim();
+  const p = prestamos.find(x => x.id == id);
+
+  const { error } = await supabaseClient.from('prestamos').update({
+    estado,
+    condicion_entrada: condicionEntrada,
+    fecha_hora_devolucion_real: new Date().toISOString(),
+    observaciones: obs ? ((p.observaciones ? p.observaciones + ' | ' : '') + obs) : p.observaciones,
+  }).eq('id', id);
+  if(error){ errBox.textContent = error.message; errBox.classList.add('show'); return; }
+
+  await supabaseClient.from('bienes').update({ estado: estado === 'perdido' ? 'baja' : 'disponible' }).eq('id', p.bien_id);
+
+  closeDevolucionModal();
+  await loadBienes();
+  await loadPrestamos();
 }
 
 // ---------- Movimientos ----------
