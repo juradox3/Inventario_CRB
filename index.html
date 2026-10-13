@@ -75,6 +75,8 @@
   .badge.devuelto{background:#E4EFE8;color:var(--green);}
   .badge.vencido{background:#F5E1DE;color:var(--red);}
   .badge.perdido{background:#2A2A2A;color:#F2F2F2;}
+  .badge.borrador{background:#F6EAD5;color:var(--amber);}
+  .badge.verificado{background:#E4EFE8;color:var(--green);}
   .card-actions{display:flex;flex-direction:column;gap:6px;align-items:flex-end;}
 
   .empty{text-align:center;padding:50px 20px;color:#7a7f77;border:1px dashed var(--line);border-radius:5px;}
@@ -150,7 +152,7 @@
     <div class="tab active" data-tab="bienes">Inventario</div>
     <div class="tab" data-tab="movimientos">Movimientos</div>
     <div class="tab" data-tab="prestamos">Préstamos</div>
-    <div class="tab soon" title="Próximamente">Levantamientos</div>
+    <div class="tab" data-tab="levantamientos">Levantamientos</div>
   </div>
 
   <div id="view-bienes">
@@ -204,6 +206,67 @@
     </div>
     <div class="count" id="p-count"></div>
     <div id="prestamos-list"></div>
+  </div>
+
+  <div id="view-levantamientos" style="display:none;">
+    <div class="toolbar">
+      <select id="l-f-ubicacion"><option value="">Todas las ubicaciones</option></select>
+      <select id="l-f-estado">
+        <option value="">Todos los estados</option>
+        <option value="borrador">Borrador</option>
+        <option value="verificado">Verificado</option>
+      </select>
+      <button onclick="openLevModal()">+ Nuevo levantamiento</button>
+    </div>
+    <div class="count" id="l-count"></div>
+    <div id="levantamientos-list"></div>
+  </div>
+</div>
+
+<!-- Modal: nuevo levantamiento -->
+<div class="modal-bg" id="lev-modal-bg">
+  <div class="modal">
+    <h2>Nuevo levantamiento de inventario</h2>
+    <div class="field">
+      <label>Ubicación *</label>
+      <select id="l-ubicacion"></select>
+    </div>
+    <div class="field">
+      <label>Responsable del área *</label>
+      <select id="l-responsable"></select>
+      <div class="inline-add" id="lev-per-add-row" style="display:none;">
+        <input id="lev-per-add-nombre" placeholder="Nombre">
+        <input id="lev-per-add-cargo" placeholder="Cargo">
+        <button class="small ghost" onclick="addPersonaLevantamiento()">Agregar</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Cargo del responsable (en este momento)</label>
+      <input id="l-cargo" placeholder="Ej. Coordinadora Académica">
+    </div>
+    <div class="field">
+      <label>Fecha y hora</label>
+      <input id="l-fecha" type="datetime-local">
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Registró</label>
+        <select id="l-registrado"></select>
+      </div>
+      <div class="field">
+        <label>Revisó</label>
+        <select id="l-revisado"><option value="">Sin asignar</option></select>
+      </div>
+    </div>
+    <div class="field">
+      <label>Verificó</label>
+      <select id="l-verificado"><option value="">Sin asignar</option></select>
+    </div>
+    <div class="err" id="lev-err"></div>
+    <div class="modal-actions">
+      <button class="ghost" onclick="closeLevModal()">Cancelar</button>
+      <button onclick="saveLevantamiento()">Guardar</button>
+    </div>
   </div>
 </div>
 
@@ -768,8 +831,10 @@ function switchTab(tab){
   document.getElementById('view-bienes').style.display = tab === 'bienes' ? 'block' : 'none';
   document.getElementById('view-movimientos').style.display = tab === 'movimientos' ? 'block' : 'none';
   document.getElementById('view-prestamos').style.display = tab === 'prestamos' ? 'block' : 'none';
+  document.getElementById('view-levantamientos').style.display = tab === 'levantamientos' ? 'block' : 'none';
   if(tab === 'movimientos') loadMovimientos();
   if(tab === 'prestamos') loadPrestamos();
+  if(tab === 'levantamientos') loadLevantamientos();
 }
 
 // ---------- Préstamos ----------
@@ -1084,6 +1149,172 @@ async function saveMovimiento(){
   closeMovModal();
   await loadBienes();
   await loadMovimientos();
+}
+
+// ---------- Levantamientos de inventario ----------
+
+let levantamientos = [];
+
+function personaNombre(id){
+  if(!id) return null;
+  const p = personas.find(x => x.id === id);
+  return p ? p.nombre : '—';
+}
+
+function levEstadoLabel(e){
+  return { borrador:'Borrador', verificado:'Verificado' }[e] || e;
+}
+
+function fillPersonaSelects(){
+  fillSelect('l-responsable', personas, false);
+  appendAddOption('l-responsable');
+  fillSelect('l-registrado', personas, true, 'Sin asignar');
+  fillSelect('l-revisado', personas, true, 'Sin asignar');
+  fillSelect('l-verificado', personas, true, 'Sin asignar');
+}
+
+async function loadLevantamientos(){
+  await loadPersonas();
+  fillPersonaSelects();
+  fillSelect('l-f-ubicacion', ubicaciones, true, 'Todas las ubicaciones');
+  fillSelect('l-ubicacion', ubicaciones, false);
+
+  const { data, error } = await supabaseClient
+    .from('levantamientos_inventario')
+    .select('*, ubicaciones(nombre)')
+    .order('fecha_hora', { ascending: false });
+  if(error){ console.error(error); return; }
+  levantamientos = data || [];
+  renderLevantamientos();
+}
+
+function renderLevantamientos(){
+  const fUbi = document.getElementById('l-f-ubicacion').value;
+  const fEstado = document.getElementById('l-f-estado').value;
+  const filtrados = levantamientos.filter(l => {
+    if(fUbi && String(l.ubicacion_id) !== fUbi) return false;
+    if(fEstado && l.estado !== fEstado) return false;
+    return true;
+  });
+
+  const list = document.getElementById('levantamientos-list');
+  document.getElementById('l-count').textContent = `${filtrados.length} levantamiento(s)`;
+
+  if(filtrados.length === 0){
+    list.innerHTML = '<div class="empty">No hay levantamientos registrados todavía.</div>';
+    return;
+  }
+
+  list.innerHTML = filtrados.map(l => {
+    const bienesUbic = bienes.filter(b => b.ubicacion_id === l.ubicacion_id && b.estado !== 'baja');
+    return `
+    <div class="card">
+      <div class="card-body">
+        <div class="card-title">${escapeHtml(l.ubicaciones?.nombre || '—')}</div>
+        <div class="card-meta">
+          🕒 ${new Date(l.fecha_hora).toLocaleString('es-CO')}<br>
+          👤 Responsable: ${escapeHtml(personaNombre(l.responsable_id) || '—')}${l.cargo_responsable ? ' · ' + escapeHtml(l.cargo_responsable) : ''}<br>
+          ✍️ Registró: ${escapeHtml(personaNombre(l.registrado_por_id) || 'Sin asignar')} &nbsp;·&nbsp;
+          Revisó: ${escapeHtml(personaNombre(l.revisado_por_id) || 'Sin asignar')} &nbsp;·&nbsp;
+          Verificó: ${escapeHtml(personaNombre(l.verificado_por_id) || 'Sin asignar')}<br>
+          📦 ${bienesUbic.length} bien(es) activos registrados en esta ubicación
+        </div>
+        <span class="badge ${l.estado}">${levEstadoLabel(l.estado)}</span>
+      </div>
+      <div class="card-actions">
+        ${l.estado === 'borrador' ? `<button class="small ghost" onclick="marcarVerificado(${l.id})">Marcar verificado</button>` : ''}
+      </div>
+    </div>
+  `}).join('');
+}
+
+['l-f-ubicacion','l-f-estado'].forEach(id => document.getElementById(id).addEventListener('change', renderLevantamientos));
+
+document.getElementById('l-responsable').addEventListener('change', e => {
+  document.getElementById('lev-per-add-row').style.display = e.target.value === '__add__' ? 'flex' : 'none';
+  const persona = personas.find(x => String(x.id) === e.target.value);
+  document.getElementById('l-cargo').value = persona ? (persona.cargo || '') : '';
+});
+
+async function addPersonaLevantamiento(){
+  const nombre = document.getElementById('lev-per-add-nombre').value.trim();
+  const cargo = document.getElementById('lev-per-add-cargo').value.trim() || null;
+  if(!nombre) return;
+  const { data, error } = await supabaseClient.from('personas').insert({ nombre, cargo }).select().single();
+  if(error){ alert('No se pudo agregar la persona: ' + error.message); return; }
+  personas.push(data);
+  personas.sort((a,b) => a.nombre.localeCompare(b.nombre));
+  fillPersonaSelects();
+  document.getElementById('l-responsable').value = data.id;
+  document.getElementById('l-cargo').value = data.cargo || '';
+  document.getElementById('lev-per-add-row').style.display = 'none';
+  document.getElementById('lev-per-add-nombre').value = '';
+  document.getElementById('lev-per-add-cargo').value = '';
+}
+
+function toLocalDatetimeValue(d){
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function openLevModal(){
+  document.getElementById('lev-err').classList.remove('show');
+  document.getElementById('lev-per-add-row').style.display = 'none';
+  document.getElementById('l-cargo').value = '';
+  document.getElementById('l-fecha').value = toLocalDatetimeValue(new Date());
+  document.getElementById('l-revisado').value = '';
+  document.getElementById('l-verificado').value = '';
+  if(currentUsuario && currentUsuario.persona_id){
+    document.getElementById('l-registrado').value = currentUsuario.persona_id;
+  }
+  document.getElementById('lev-modal-bg').classList.add('open');
+}
+
+function closeLevModal(){
+  document.getElementById('lev-modal-bg').classList.remove('open');
+}
+
+async function saveLevantamiento(){
+  const errBox = document.getElementById('lev-err');
+  errBox.classList.remove('show');
+
+  const ubicacionId = document.getElementById('l-ubicacion').value;
+  const responsableId = document.getElementById('l-responsable').value;
+  const cargo = document.getElementById('l-cargo').value.trim() || null;
+  const fecha = document.getElementById('l-fecha').value;
+  const registradoId = document.getElementById('l-registrado').value || null;
+  const revisadoId = document.getElementById('l-revisado').value || null;
+  const verificadoId = document.getElementById('l-verificado').value || null;
+
+  if(!ubicacionId || !responsableId || responsableId === '__add__'){
+    errBox.textContent = 'Selecciona la ubicación y el responsable.';
+    errBox.classList.add('show');
+    return;
+  }
+
+  const payload = {
+    ubicacion_id: ubicacionId,
+    responsable_id: responsableId,
+    cargo_responsable: cargo,
+    fecha_hora: fecha ? new Date(fecha).toISOString() : new Date().toISOString(),
+    registrado_por_id: registradoId,
+    revisado_por_id: revisadoId,
+    verificado_por_id: verificadoId,
+    estado: 'borrador',
+  };
+
+  const { error } = await supabaseClient.from('levantamientos_inventario').insert(payload);
+  if(error){ errBox.textContent = error.message; errBox.classList.add('show'); return; }
+
+  closeLevModal();
+  await loadLevantamientos();
+}
+
+async function marcarVerificado(id){
+  if(!confirm('¿Marcar este levantamiento como verificado?')) return;
+  const { error } = await supabaseClient.from('levantamientos_inventario').update({ estado: 'verificado' }).eq('id', id);
+  if(error){ alert('No se pudo actualizar: ' + error.message); return; }
+  await loadLevantamientos();
 }
 </script>
 </body>
