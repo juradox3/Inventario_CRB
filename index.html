@@ -107,6 +107,16 @@
   .login-error.show{display:block;}
   .login-toggle{font-size:12.5px;color:var(--azul);margin-top:14px;cursor:pointer;text-decoration:underline;}
   .login-note{font-size:11.5px;color:var(--gris);margin-top:10px;}
+
+  .imp-block{background:var(--card);border:1px solid var(--line);border-radius:5px;padding:14px 16px;margin-bottom:12px;}
+  .imp-block-head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
+  .imp-block-head input{flex:1;min-width:180px;font-weight:600;}
+  .imp-block-meta{font-size:12px;color:var(--gris);}
+  table.imp-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px;}
+  table.imp-table th{text-align:left;font-family:'IBM Plex Mono',monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--gris);border-bottom:1px solid var(--line);padding:6px 8px;}
+  table.imp-table td{padding:6px 8px;border-bottom:1px solid #F0F0F0;vertical-align:top;}
+  table.imp-table tr.excluida{opacity:.4;text-decoration:line-through;}
+  .imp-table-wrap{max-height:260px;overflow-y:auto;border:1px solid var(--line);border-radius:4px;}
 </style>
 </head>
 <body>
@@ -153,6 +163,7 @@
     <div class="tab" data-tab="movimientos">Movimientos</div>
     <div class="tab" data-tab="prestamos">Préstamos</div>
     <div class="tab" data-tab="levantamientos">Levantamientos</div>
+    <div class="tab" data-tab="importar">Importar Excel</div>
   </div>
 
   <div id="view-bienes">
@@ -220,6 +231,33 @@
     </div>
     <div class="count" id="l-count"></div>
     <div id="levantamientos-list"></div>
+  </div>
+
+  <div id="view-importar" style="display:none;">
+    <div class="card" style="display:block;">
+      <div class="card-body">
+        <div class="card-title">Carga masiva desde Excel</div>
+        <div class="card-meta">
+          Selecciona uno o varios archivos con el formato "Inventario Planta y Equipo" del colegio.
+          El sistema lee el campo "Ubicación del Bien" de cada hoja (no el nombre del archivo) y detecta
+          las categorías a partir de los encabezados de grupo. Nada se guarda hasta que revises la vista
+          previa y confirmes.
+        </div>
+        <div class="toolbar" style="margin-top:14px;">
+          <input type="file" id="imp-files" accept=".xlsx,.xls" multiple>
+          <button onclick="procesarArchivos()">Procesar archivos</button>
+        </div>
+        <div class="err" id="imp-err"></div>
+      </div>
+    </div>
+
+    <div id="imp-status" class="count"></div>
+    <div id="imp-preview"></div>
+
+    <div id="imp-actions" style="display:none; margin-top:14px;">
+      <button onclick="importarTodo()">Importar todo a la base de datos</button>
+      <span id="imp-result" style="margin-left:12px; font-size:12.5px; color:var(--gris);"></span>
+    </div>
   </div>
 </div>
 
@@ -462,6 +500,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script>
 const SUPABASE_URL = 'https://ieollhhwrpjjhrwsdyhc.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_g8SIJbENLhMmq3pnyviHAg_8QBB9Sas';
@@ -832,6 +871,7 @@ function switchTab(tab){
   document.getElementById('view-movimientos').style.display = tab === 'movimientos' ? 'block' : 'none';
   document.getElementById('view-prestamos').style.display = tab === 'prestamos' ? 'block' : 'none';
   document.getElementById('view-levantamientos').style.display = tab === 'levantamientos' ? 'block' : 'none';
+  document.getElementById('view-importar').style.display = tab === 'importar' ? 'block' : 'none';
   if(tab === 'movimientos') loadMovimientos();
   if(tab === 'prestamos') loadPrestamos();
   if(tab === 'levantamientos') loadLevantamientos();
@@ -1315,6 +1355,247 @@ async function marcarVerificado(id){
   const { error } = await supabaseClient.from('levantamientos_inventario').update({ estado: 'verificado' }).eq('id', id);
   if(error){ alert('No se pudo actualizar: ' + error.message); return; }
   await loadLevantamientos();
+}
+
+// ---------- Importar desde Excel ----------
+
+let importBlocks = [];
+
+function norm(s){
+  return String(s ?? '').trim();
+}
+
+function esNumero(v){
+  return typeof v === 'number' && !isNaN(v);
+}
+
+function pareceActaCompra(v){
+  return /CI\s*[-–—]\s*DAF/i.test(String(v ?? ''));
+}
+
+function parseHoja(sheet, nombreArchivo, nombreHoja){
+  const filas = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+  const bloques = [];
+  let bloqueActual = null;
+  let colIdx = null;
+  let grupoActual = null;
+
+  for(let i = 0; i < filas.length; i++){
+    const fila = filas[i];
+    if(!fila || fila.every(c => norm(c) === '')) continue;
+
+    const primeraCelda = norm(fila[0]);
+    if(/^Ubicaci[oó]n del Bien/i.test(primeraCelda)){
+      const valor = fila.slice(1).map(norm).find(c => c !== '');
+      bloqueActual = { ubicacion: valor || ('(sin nombre: ' + nombreArchivo + ')'), origenArchivo: nombreArchivo + ' / ' + nombreHoja, items: [] };
+      bloques.push(bloqueActual);
+      colIdx = null;
+      grupoActual = null;
+      continue;
+    }
+
+    const idxPlaca = fila.findIndex(c => /placa del activo/i.test(norm(c)));
+    if(idxPlaca !== -1){
+      colIdx = {
+        placa: idxPlaca,
+        grupo: fila.findIndex(c => /grupo del activo/i.test(norm(c))),
+        descripcion: fila.findIndex(c => /descripci[oó]n del activo/i.test(norm(c))),
+        cantidad: fila.findIndex(c => /cantidad/i.test(norm(c))),
+        observaciones: fila.findIndex(c => /observaci/i.test(norm(c))),
+      };
+      continue;
+    }
+
+    if(!bloqueActual || !colIdx) continue;
+
+    const descripcion = norm(fila[colIdx.descripcion]);
+    const cantidadRaw = fila[colIdx.cantidad];
+    const placaRaw = norm(fila[colIdx.placa]);
+    const grupoRaw = colIdx.grupo !== -1 ? norm(fila[colIdx.grupo]) : '';
+    const observaciones = colIdx.observaciones !== -1 ? norm(fila[colIdx.observaciones]) : '';
+
+    if(!descripcion) continue;
+
+    const cantidad = esNumero(cantidadRaw) ? cantidadRaw : (parseInt(cantidadRaw, 10) || null);
+
+    if(!cantidad || cantidad <= 0){
+      grupoActual = descripcion.replace(/:$/, '');
+      continue;
+    }
+
+    bloqueActual.items.push({
+      descripcion,
+      cantidad,
+      placa_serial: placaRaw && !pareceActaCompra(placaRaw) ? placaRaw : null,
+      acta_compra: placaRaw && pareceActaCompra(placaRaw) ? placaRaw : null,
+      observaciones: observaciones || null,
+      grupo: (grupoRaw || grupoActual || 'Sin categoría'),
+      incluida: true,
+    });
+  }
+
+  return bloques;
+}
+
+async function procesarArchivos(){
+  const errBox = document.getElementById('imp-err');
+  errBox.classList.remove('show');
+  const input = document.getElementById('imp-files');
+  const files = Array.from(input.files || []);
+  if(files.length === 0){
+    errBox.textContent = 'Selecciona al menos un archivo .xlsx.';
+    errBox.classList.add('show');
+    return;
+  }
+
+  document.getElementById('imp-status').textContent = 'Procesando ' + files.length + ' archivo(s)...';
+  importBlocks = [];
+
+  for(const file of files){
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      for(const nombreHoja of wb.SheetNames){
+        const sheet = wb.Sheets[nombreHoja];
+        const bloques = parseHoja(sheet, file.name, nombreHoja);
+        importBlocks.push(...bloques);
+      }
+    } catch(e){
+      console.error('Error procesando', file.name, e);
+    }
+  }
+
+  importBlocks = importBlocks.filter(b => b.items.length > 0);
+  renderImportPreview();
+}
+
+function renderImportPreview(){
+  const totalItems = importBlocks.reduce((sum, b) => sum + b.items.filter(i => i.incluida).length, 0);
+  document.getElementById('imp-status').textContent =
+    `${importBlocks.length} ubicación(es) detectada(s), ${totalItems} bien(es) para importar.`;
+
+  const cont = document.getElementById('imp-preview');
+  if(importBlocks.length === 0){
+    cont.innerHTML = '<div class="empty">No se detectó información reconocible en los archivos seleccionados.</div>';
+    document.getElementById('imp-actions').style.display = 'none';
+    return;
+  }
+
+  cont.innerHTML = importBlocks.map((b, bi) => `
+    <div class="imp-block">
+      <div class="imp-block-head">
+        <input value="${escapeHtml(b.ubicacion)}" onchange="importBlocks[${bi}].ubicacion = this.value">
+        <span class="imp-block-meta">${b.items.length} bien(es) · ${escapeHtml(b.origenArchivo)}</span>
+      </div>
+      <div class="imp-table-wrap">
+        <table class="imp-table">
+          <thead><tr><th></th><th>Descripción</th><th>Categoría</th><th>Cant.</th><th>Placa/Serial</th><th>Acta compra</th><th>Observaciones</th></tr></thead>
+          <tbody>
+            ${b.items.map((it, ii) => `
+              <tr class="${it.incluida ? '' : 'excluida'}">
+                <td><input type="checkbox" ${it.incluida ? 'checked' : ''} onchange="importBlocks[${bi}].items[${ii}].incluida = this.checked; renderImportPreview();"></td>
+                <td>${escapeHtml(it.descripcion)}</td>
+                <td>${escapeHtml(it.grupo)}</td>
+                <td>${it.cantidad}</td>
+                <td>${escapeHtml(it.placa_serial || '')}</td>
+                <td>${escapeHtml(it.acta_compra || '')}</td>
+                <td>${escapeHtml(it.observaciones || '')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `).join('');
+
+  document.getElementById('imp-actions').style.display = 'block';
+}
+
+async function resolverUbicacionId(nombre, cache){
+  const key = nombre.trim().toLowerCase();
+  if(cache.has(key)) return cache.get(key);
+  let existente = ubicaciones.find(u => u.nombre.trim().toLowerCase() === key);
+  if(!existente){
+    const { data, error } = await supabaseClient.from('ubicaciones').insert({ nombre: nombre.trim() }).select().single();
+    if(error) throw error;
+    existente = data;
+    ubicaciones.push(existente);
+  }
+  cache.set(key, existente.id);
+  return existente.id;
+}
+
+async function resolverCategoriaId(nombre, cache){
+  const key = nombre.trim().toLowerCase();
+  if(cache.has(key)) return cache.get(key);
+  let existente = categorias.find(c => c.nombre.trim().toLowerCase() === key);
+  if(!existente){
+    const { data, error } = await supabaseClient.from('categorias').insert({ nombre: nombre.trim() }).select().single();
+    if(error) throw error;
+    existente = data;
+    categorias.push(existente);
+  }
+  cache.set(key, existente.id);
+  return existente.id;
+}
+
+async function importarTodo(){
+  const resultBox = document.getElementById('imp-result');
+  resultBox.textContent = 'Importando...';
+
+  const ubicCache = new Map();
+  const catCache = new Map();
+  let importados = 0;
+  let errores = 0;
+
+  for(const bloque of importBlocks){
+    const itemsIncluidos = bloque.items.filter(i => i.incluida);
+    if(itemsIncluidos.length === 0) continue;
+
+    let ubicacionId;
+    try {
+      ubicacionId = await resolverUbicacionId(bloque.ubicacion, ubicCache);
+    } catch(e){
+      console.error('No se pudo resolver ubicación', bloque.ubicacion, e);
+      errores += itemsIncluidos.length;
+      continue;
+    }
+
+    const payloads = [];
+    for(const item of itemsIncluidos){
+      try {
+        const categoriaId = await resolverCategoriaId(item.grupo, catCache);
+        payloads.push({
+          descripcion: item.descripcion,
+          cantidad: item.cantidad,
+          categoria_id: categoriaId,
+          ubicacion_id: ubicacionId,
+          placa_serial: item.placa_serial,
+          acta_compra: item.acta_compra,
+          observaciones: item.observaciones,
+          estado: 'disponible',
+        });
+      } catch(e){
+        console.error('Error resolviendo categoría', item.grupo, e);
+        errores++;
+      }
+    }
+
+    if(payloads.length){
+      const { error } = await supabaseClient.from('bienes').insert(payloads);
+      if(error){
+        console.error('Error insertando bienes de', bloque.ubicacion, error);
+        errores += payloads.length;
+      } else {
+        importados += payloads.length;
+      }
+    }
+    resultBox.textContent = `Importando... ${importados} bien(es) hasta ahora.`;
+  }
+
+  resultBox.textContent = `Listo: ${importados} bien(es) importado(s)${errores ? `, ${errores} con error (revisa la consola)` : ''}.`;
+  await loadCatalogos();
+  await loadBienes();
 }
 </script>
 </body>
