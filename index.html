@@ -164,6 +164,7 @@
     <div class="tab" data-tab="prestamos">Préstamos</div>
     <div class="tab" data-tab="levantamientos">Levantamientos</div>
     <div class="tab" data-tab="importar">Importar Excel</div>
+    <div class="tab" data-tab="usuarios" id="tab-usuarios" style="display:none;">Usuarios</div>
   </div>
 
   <div id="view-bienes">
@@ -258,6 +259,11 @@
       <button onclick="importarTodo()">Importar todo a la base de datos</button>
       <span id="imp-result" style="margin-left:12px; font-size:12.5px; color:var(--gris);"></span>
     </div>
+  </div>
+
+  <div id="view-usuarios" style="display:none;">
+    <div class="count" id="u-count"></div>
+    <div id="usuarios-list"></div>
   </div>
 </div>
 
@@ -595,6 +601,7 @@ async function afterLogin(authUser){
 
   document.getElementById('who-nombre').textContent = usuario?.personas?.nombre || authUser.email;
   document.getElementById('who-rol').textContent = usuario?.roles?.nombre || 'Sin rol';
+  document.getElementById('tab-usuarios').style.display = (usuario?.roles?.nombre === 'Administrador') ? '' : 'none';
 
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
@@ -872,9 +879,11 @@ function switchTab(tab){
   document.getElementById('view-prestamos').style.display = tab === 'prestamos' ? 'block' : 'none';
   document.getElementById('view-levantamientos').style.display = tab === 'levantamientos' ? 'block' : 'none';
   document.getElementById('view-importar').style.display = tab === 'importar' ? 'block' : 'none';
+  document.getElementById('view-usuarios').style.display = tab === 'usuarios' ? 'block' : 'none';
   if(tab === 'movimientos') loadMovimientos();
   if(tab === 'prestamos') loadPrestamos();
   if(tab === 'levantamientos') loadLevantamientos();
+  if(tab === 'usuarios') loadUsuarios();
 }
 
 // ---------- Préstamos ----------
@@ -1596,6 +1605,57 @@ async function importarTodo(){
   resultBox.textContent = `Listo: ${importados} bien(es) importado(s)${errores ? `, ${errores} con error (revisa la consola)` : ''}.`;
   await loadCatalogos();
   await loadBienes();
+}
+
+// ---------- Usuarios y roles ----------
+
+let usuariosList = [];
+let rolesList = [];
+
+async function loadUsuarios(){
+  const { data: rolesData } = await supabaseClient.from('roles').select('*').order('id');
+  rolesList = rolesData || [];
+
+  const { data, error } = await supabaseClient
+    .from('usuarios')
+    .select('*, personas(nombre, cargo), roles(nombre)')
+    .order('creado_en');
+  if(error){ console.error(error); return; }
+  usuariosList = data || [];
+  renderUsuarios();
+}
+
+function renderUsuarios(){
+  document.getElementById('u-count').textContent = `${usuariosList.length} usuario(s)`;
+  const list = document.getElementById('usuarios-list');
+
+  if(usuariosList.length === 0){
+    list.innerHTML = '<div class="empty">No hay usuarios registrados.</div>';
+    return;
+  }
+
+  list.innerHTML = usuariosList.map(u => `
+    <div class="card">
+      <div class="card-body">
+        <div class="card-title">${escapeHtml(u.personas?.nombre || u.correo)}</div>
+        <div class="card-meta">
+          ✉️ ${escapeHtml(u.correo)}${u.personas?.cargo ? ' · ' + escapeHtml(u.personas.cargo) : ''}<br>
+          🗓️ Desde: ${new Date(u.creado_en).toLocaleDateString('es-CO')}
+        </div>
+      </div>
+      <div class="card-actions">
+        <select onchange="cambiarRol(${u.id}, this.value)" ${u.id === currentUsuario.id ? 'disabled title="No puedes cambiar tu propio rol"' : ''}>
+          ${rolesList.map(r => `<option value="${r.id}" ${r.id === u.rol_id ? 'selected' : ''}>${escapeHtml(r.nombre)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function cambiarRol(usuarioId, nuevoRolId){
+  const { error } = await supabaseClient.from('usuarios').update({ rol_id: nuevoRolId }).eq('id', usuarioId);
+  if(error){ alert('No se pudo cambiar el rol: ' + error.message); return; }
+  await loadUsuarios();
 }
 </script>
 </body>
