@@ -163,7 +163,7 @@
     <div class="tab" data-tab="movimientos">Movimientos</div>
     <div class="tab" data-tab="prestamos">Préstamos</div>
     <div class="tab" data-tab="levantamientos">Levantamientos</div>
-    <div class="tab" data-tab="importar">Importar Excel</div>
+    <div class="tab" data-tab="importar" id="tab-importar">Importar Excel</div>
     <div class="tab" data-tab="usuarios" id="tab-usuarios" style="display:none;">Usuarios</div>
   </div>
 
@@ -182,7 +182,7 @@
           <option value="baja">De baja</option>
         </select>
       </div>
-      <button onclick="openBienModal()">+ Nuevo bien</button>
+      <button onclick="openBienModal()" id="btn-nuevo-bien">+ Nuevo bien</button>
     </div>
 
     <div class="count" id="count"></div>
@@ -199,7 +199,7 @@
         <option value="mantenimiento">Mantenimiento</option>
         <option value="baja">Baja</option>
       </select>
-      <button onclick="openMovModal()">+ Nuevo movimiento</button>
+      <button onclick="openMovModal()" id="btn-nuevo-mov">+ Nuevo movimiento</button>
     </div>
     <div class="count" id="mov-count"></div>
     <div id="movimientos-list"></div>
@@ -214,7 +214,7 @@
         <option value="vencido">Vencido</option>
         <option value="perdido">Perdido</option>
       </select>
-      <button onclick="openPrestamoModal()">+ Nuevo préstamo</button>
+      <button onclick="openPrestamoModal()" id="btn-nuevo-prestamo">+ Nuevo préstamo</button>
     </div>
     <div class="count" id="p-count"></div>
     <div id="prestamos-list"></div>
@@ -228,7 +228,7 @@
         <option value="borrador">Borrador</option>
         <option value="verificado">Verificado</option>
       </select>
-      <button onclick="openLevModal()">+ Nuevo levantamiento</button>
+      <button onclick="openLevModal()" id="btn-nuevo-lev">+ Nuevo levantamiento</button>
     </div>
     <div class="count" id="l-count"></div>
     <div id="levantamientos-list"></div>
@@ -513,6 +513,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_g8SIJbENLhMmq3pnyviHAg_8QBB9Sas';
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUsuario = null;   // fila de la tabla usuarios del que inició sesión
+let esConsulta = false;      // true si el rol actual es "Consulta" (solo lectura)
 let ubicaciones = [];
 let categorias = [];
 let bienes = [];
@@ -602,6 +603,13 @@ async function afterLogin(authUser){
   document.getElementById('who-nombre').textContent = usuario?.personas?.nombre || authUser.email;
   document.getElementById('who-rol').textContent = usuario?.roles?.nombre || 'Sin rol';
   document.getElementById('tab-usuarios').style.display = (usuario?.roles?.nombre === 'Administrador') ? '' : 'none';
+
+  esConsulta = (usuario?.roles?.nombre === 'Consulta');
+  document.getElementById('tab-importar').style.display = esConsulta ? 'none' : '';
+  document.getElementById('btn-nuevo-bien').style.display = esConsulta ? 'none' : '';
+  document.getElementById('btn-nuevo-mov').style.display = esConsulta ? 'none' : '';
+  document.getElementById('btn-nuevo-prestamo').style.display = esConsulta ? 'none' : '';
+  document.getElementById('btn-nuevo-lev').style.display = esConsulta ? 'none' : '';
 
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
@@ -749,8 +757,10 @@ function renderBienes(){
         <span class="badge ${b.estado}">${estadoLabel(b.estado)}</span>
       </div>
       <div class="card-actions">
+        ${esConsulta ? '' : `
         <button class="small ghost" onclick="openBienModal(${b.id})">Editar</button>
         <button class="small ghost" onclick="openEstadoModal(${b.id})">Cambiar estado</button>
+        `}
       </div>
     </div>
   `).join('');
@@ -968,7 +978,7 @@ function renderPrestamos(){
         <span class="badge ${p.estado}">${prestamoEstadoLabel(p.estado)}</span>
       </div>
       <div class="card-actions">
-        ${p.estado === 'prestado' ? `<button class="small ghost" onclick="openDevolucionModal(${p.id})">Registrar devolución</button>` : ''}
+        ${(!esConsulta && p.estado === 'prestado') ? `<button class="small ghost" onclick="openDevolucionModal(${p.id})">Registrar devolución</button>` : ''}
       </div>
     </div>
   `).join('');
@@ -1271,7 +1281,7 @@ function renderLevantamientos(){
         <span class="badge ${l.estado}">${levEstadoLabel(l.estado)}</span>
       </div>
       <div class="card-actions">
-        ${l.estado === 'borrador' ? `<button class="small ghost" onclick="marcarVerificado(${l.id})">Marcar verificado</button>` : ''}
+        ${(!esConsulta && l.estado === 'borrador') ? `<button class="small ghost" onclick="marcarVerificado(${l.id})">Marcar verificado</button>` : ''}
       </div>
     </div>
   `}).join('');
