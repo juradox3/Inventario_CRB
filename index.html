@@ -514,6 +514,8 @@ const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUsuario = null;   // fila de la tabla usuarios del que inició sesión
 let esConsulta = false;      // true si el rol actual es "Consulta" (solo lectura)
+let puedeDarBaja = false;              // true si el rol puede dar de baja un bien (Administrador, Directivo)
+let puedeVerificarLevantamiento = false; // true si el rol puede verificar un levantamiento (Administrador, Directivo)
 let ubicaciones = [];
 let categorias = [];
 let bienes = [];
@@ -602,9 +604,13 @@ async function afterLogin(authUser){
 
   document.getElementById('who-nombre').textContent = usuario?.personas?.nombre || authUser.email;
   document.getElementById('who-rol').textContent = usuario?.roles?.nombre || 'Sin rol';
-  document.getElementById('tab-usuarios').style.display = (usuario?.roles?.nombre === 'Administrador') ? '' : 'none';
+  const rolNombre = usuario?.roles?.nombre;
+  document.getElementById('tab-usuarios').style.display = (rolNombre === 'Administrador') ? '' : 'none';
 
-  esConsulta = (usuario?.roles?.nombre === 'Consulta');
+  esConsulta = (rolNombre === 'Consulta');
+  puedeDarBaja = (rolNombre === 'Administrador' || rolNombre === 'Directivo');
+  puedeVerificarLevantamiento = (rolNombre === 'Administrador' || rolNombre === 'Directivo');
+
   document.getElementById('tab-importar').style.display = esConsulta ? 'none' : '';
   document.getElementById('btn-nuevo-bien').style.display = esConsulta ? 'none' : '';
   document.getElementById('btn-nuevo-mov').style.display = esConsulta ? 'none' : '';
@@ -843,6 +849,8 @@ function openEstadoModal(id){
   document.getElementById('e-bien-desc').textContent = b.descripcion + (b.placa_serial ? ' (' + b.placa_serial + ')' : '');
   document.getElementById('e-estado').value = b.estado === 'disponible' ? 'mantenimiento' : 'disponible';
   document.getElementById('e-obs').value = '';
+  const opcionBaja = document.querySelector('#e-estado option[value="baja"]');
+  if(opcionBaja) opcionBaja.style.display = puedeDarBaja ? '' : 'none';
   document.getElementById('estado-modal-bg').classList.add('open');
 }
 
@@ -857,6 +865,12 @@ async function saveEstado(){
   const estado = document.getElementById('e-estado').value;
   const obs = document.getElementById('e-obs').value.trim();
   const b = bienes.find(x => x.id == id);
+
+  if(estado === 'baja' && !puedeDarBaja){
+    errBox.textContent = 'Tu rol no tiene permiso para dar de baja un bien. Contacta a un Directivo o Administrador.';
+    errBox.classList.add('show');
+    return;
+  }
 
   const { error } = await supabaseClient.from('bienes').update({ estado }).eq('id', id);
   if(error){ errBox.textContent = error.message; errBox.classList.add('show'); return; }
@@ -1281,7 +1295,7 @@ function renderLevantamientos(){
         <span class="badge ${l.estado}">${levEstadoLabel(l.estado)}</span>
       </div>
       <div class="card-actions">
-        ${(!esConsulta && l.estado === 'borrador') ? `<button class="small ghost" onclick="marcarVerificado(${l.id})">Marcar verificado</button>` : ''}
+        ${(puedeVerificarLevantamiento && l.estado === 'borrador') ? `<button class="small ghost" onclick="marcarVerificado(${l.id})">Marcar verificado</button>` : ''}
       </div>
     </div>
   `}).join('');
@@ -1370,6 +1384,10 @@ async function saveLevantamiento(){
 }
 
 async function marcarVerificado(id){
+  if(!puedeVerificarLevantamiento){
+    alert('Tu rol no tiene permiso para verificar un levantamiento. Contacta a un Directivo o Administrador.');
+    return;
+  }
   if(!confirm('¿Marcar este levantamiento como verificado?')) return;
   const { error } = await supabaseClient.from('levantamientos_inventario').update({ estado: 'verificado' }).eq('id', id);
   if(error){ alert('No se pudo actualizar: ' + error.message); return; }
