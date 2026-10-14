@@ -58,6 +58,9 @@ CREATE TABLE bienes (
     estado          VARCHAR(20) NOT NULL DEFAULT 'disponible'
                         CHECK (estado IN ('disponible','prestado','mantenimiento','danado','baja')),
     acta_compra     VARCHAR(60),               -- acta/comprobante de compra (ej. "CI - DAF - 09/2025")
+    proveedor       VARCHAR(150),              -- empresa a la que se le compro el bien
+    comprado_por    VARCHAR(150),              -- nombre de quien hizo la compra
+    factura_foto_url TEXT,                     -- foto de la factura/recibo de compra
     foto_url        TEXT,
     observaciones   TEXT,
     creado_en       TIMESTAMP NOT NULL DEFAULT now()
