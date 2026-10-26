@@ -787,7 +787,7 @@ function renderBienes(){
   list.innerHTML = filtrados.map(b => `
     <div class="card">
       ${b.placa_serial ? `<div class="tag">${escapeHtml(b.placa_serial)}</div>` : ''}
-      ${b.foto_url ? `<img src="${escapeHtml(b.foto_url)}" alt="Foto del bien" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px 8px 0 0;">` : ''}
+      ${b.foto_url ? `<img src="${escapeHtml(b.foto_url)}" alt="Foto del bien" style="width:100%;height:140px;object-fit:contain;background:#f1f5f9;border-radius:8px 8px 0 0;">` : ''}
       <div class="card-body">
         <div class="card-title">${escapeHtml(b.descripcion)}</div>
         <div class="card-meta">
@@ -886,29 +886,32 @@ function closeBienModal(){
 
 // Reduce una imagen a un tamano maximo de 1280px por lado y la comprime
 // a JPEG de calidad 0.8, para que las fotos tomadas con celular no suban
-// pesadas ni se vean gigantes en las tarjetas.
-function redimensionarImagen(file, maxDim = 1280, calidad = 0.8){
+// pesadas ni se vean gigantes en las tarjetas. Usa createImageBitmap con
+// imageOrientation:'from-image' cuando esta disponible para respetar la
+// orientacion EXIF original (si no, el canvas puede dibujar la foto
+// girada/sin rotar como vino el sensor de la camara).
+async function redimensionarImagen(file, maxDim = 1280, calidad = 0.8){
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch(e) {
+    bitmap = await createImageBitmap(file);
+  }
+  let { width, height } = bitmap;
+  if(width > maxDim || height > maxDim){
+    if(width > height){ height = Math.round(height * maxDim / width); width = maxDim; }
+    else { width = Math.round(width * maxDim / height); height = maxDim; }
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
   return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      let { width, height } = img;
-      if(width > maxDim || height > maxDim){
-        if(width > height){ height = Math.round(height * maxDim / width); width = maxDim; }
-        else { width = Math.round(width * maxDim / height); height = maxDim; }
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-      canvas.toBlob(blob => {
-        if(!blob){ reject(new Error('No se pudo procesar la imagen')); return; }
-        resolve(blob);
-      }, 'image/jpeg', calidad);
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo leer la imagen')); };
-    img.src = url;
+    canvas.toBlob(blob => {
+      if(!blob){ reject(new Error('No se pudo procesar la imagen')); return; }
+      resolve(blob);
+    }, 'image/jpeg', calidad);
   });
 }
 
