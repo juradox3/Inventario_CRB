@@ -2,11 +2,18 @@
 -- Fotos de los bienes: bucket de Supabase Storage + permisos
 -- Ejecutar en el SQL Editor de Supabase.
 --
--- Nota: las politicas de subida se simplificaron para solo exigir
--- "estar logueado" (sin distinguir el rol "Consulta" como en la
--- primera version). Esto no abre un hueco de seguridad real: el
--- boton para subir fotos ya esta oculto para "Consulta" en la
--- pantalla, igual que el resto de botones de crear/editar.
+-- Historial de ajustes (dejar este rastro ayuda si hay que
+-- depurar de nuevo):
+-- 1) Politicas de INSERT/UPDATE solamente -> fallaba con
+--    "new row violates row-level security policy" incluso con
+--    permisos correctos, porque el cliente subia con
+--    upsert:true, que internamente necesita poder CONSULTAR
+--    (SELECT) si el archivo ya existe. Sin politica de SELECT,
+--    esa consulta interna fallaba y el error salia disfrazado
+--    de error de insercion.
+-- 2) Se agrega la politica de SELECT que faltaba, y ademas en
+--    el codigo se quito el upsert:true (no hace falta, cada
+--    foto ya se guarda con un nombre unico).
 -- =========================================================
 
 -- Crea el bucket "fotos-bienes" como publico (las fotos se pueden
@@ -18,6 +25,14 @@ on conflict (id) do nothing;
 
 DROP POLICY IF EXISTS "fotos_bienes_subir" ON storage.objects;
 DROP POLICY IF EXISTS "fotos_bienes_reemplazar" ON storage.objects;
+DROP POLICY IF EXISTS "fotos_bienes_ver" ON storage.objects;
+
+-- Leer/consultar los archivos del bucket (necesario incluso para
+-- subir, por el chequeo interno de upsert/duplicados).
+CREATE POLICY "fotos_bienes_ver"
+ON storage.objects FOR SELECT
+TO public
+USING (bucket_id = 'fotos-bienes');
 
 -- Subir una foto nueva: cualquier usuario logueado.
 CREATE POLICY "fotos_bienes_subir"

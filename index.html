@@ -887,7 +887,7 @@ function closeBienModal(){
 async function subirFotoBien(file, carpeta){
   const nombreLimpio = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
   const ruta = `${carpeta}/${Date.now()}-${nombreLimpio}`;
-  const { error } = await supabaseClient.storage.from(FOTOS_BUCKET).upload(ruta, file, { upsert: true });
+  const { error } = await supabaseClient.storage.from(FOTOS_BUCKET).upload(ruta, file);
   if(error){
     console.error('Error subiendo archivo a Storage:', JSON.stringify(error, null, 2));
     throw error;
