@@ -884,10 +884,39 @@ function closeBienModal(){
   document.getElementById('bien-modal-bg').classList.remove('open');
 }
 
+// Reduce una imagen a un tamano maximo de 1280px por lado y la comprime
+// a JPEG de calidad 0.8, para que las fotos tomadas con celular no suban
+// pesadas ni se vean gigantes en las tarjetas.
+function redimensionarImagen(file, maxDim = 1280, calidad = 0.8){
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if(width > maxDim || height > maxDim){
+        if(width > height){ height = Math.round(height * maxDim / width); width = maxDim; }
+        else { width = Math.round(width * maxDim / height); height = maxDim; }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      canvas.toBlob(blob => {
+        if(!blob){ reject(new Error('No se pudo procesar la imagen')); return; }
+        resolve(blob);
+      }, 'image/jpeg', calidad);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo leer la imagen')); };
+    img.src = url;
+  });
+}
+
 async function subirFotoBien(file, carpeta){
-  const nombreLimpio = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-  const ruta = `${carpeta}/${Date.now()}-${nombreLimpio}`;
-  const { error } = await supabaseClient.storage.from(FOTOS_BUCKET).upload(ruta, file);
+  const blob = await redimensionarImagen(file);
+  const nombreBase = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_').replace(/\.[^.]+$/, '');
+  const ruta = `${carpeta}/${Date.now()}-${nombreBase}.jpg`;
+  const { error } = await supabaseClient.storage.from(FOTOS_BUCKET).upload(ruta, blob, { contentType: 'image/jpeg' });
   if(error){
     console.error('Error subiendo archivo a Storage:', JSON.stringify(error, null, 2));
     throw error;
