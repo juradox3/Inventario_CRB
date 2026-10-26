@@ -888,7 +888,10 @@ async function subirFotoBien(file, carpeta){
   const nombreLimpio = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_');
   const ruta = `${carpeta}/${Date.now()}-${nombreLimpio}`;
   const { error } = await supabaseClient.storage.from(FOTOS_BUCKET).upload(ruta, file, { upsert: true });
-  if(error) throw error;
+  if(error){
+    console.error('Error subiendo archivo a Storage:', JSON.stringify(error, null, 2));
+    throw error;
+  }
   const { data } = supabaseClient.storage.from(FOTOS_BUCKET).getPublicUrl(ruta);
   return data.publicUrl;
 }

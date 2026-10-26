@@ -1,7 +1,12 @@
 -- =========================================================
 -- Fotos de los bienes: bucket de Supabase Storage + permisos
--- Ejecutar en el SQL Editor de Supabase (despues de rls_v2.sql
--- y rls_v3.sql, que ya crean la funcion current_rol_nombre()).
+-- Ejecutar en el SQL Editor de Supabase.
+--
+-- Nota: las politicas de subida se simplificaron para solo exigir
+-- "estar logueado" (sin distinguir el rol "Consulta" como en la
+-- primera version). Esto no abre un hueco de seguridad real: el
+-- boton para subir fotos ya esta oculto para "Consulta" en la
+-- pantalla, igual que el resto de botones de crear/editar.
 -- =========================================================
 
 -- Crea el bucket "fotos-bienes" como publico (las fotos se pueden
@@ -11,15 +16,18 @@ insert into storage.buckets (id, name, public)
 values ('fotos-bienes', 'fotos-bienes', true)
 on conflict (id) do nothing;
 
--- Subir una foto nueva: cualquier usuario logueado que no sea "Consulta".
+DROP POLICY IF EXISTS "fotos_bienes_subir" ON storage.objects;
+DROP POLICY IF EXISTS "fotos_bienes_reemplazar" ON storage.objects;
+
+-- Subir una foto nueva: cualquier usuario logueado.
 CREATE POLICY "fotos_bienes_subir"
 ON storage.objects FOR INSERT
 TO authenticated
-WITH CHECK (bucket_id = 'fotos-bienes' AND current_rol_nombre() IS DISTINCT FROM 'Consulta');
+WITH CHECK (bucket_id = 'fotos-bienes');
 
--- Reemplazar una foto existente (mismo caso, por si se sube dos veces el mismo archivo).
+-- Reemplazar una foto existente (por si se sube dos veces el mismo archivo).
 CREATE POLICY "fotos_bienes_reemplazar"
 ON storage.objects FOR UPDATE
 TO authenticated
-USING (bucket_id = 'fotos-bienes' AND current_rol_nombre() IS DISTINCT FROM 'Consulta')
-WITH CHECK (bucket_id = 'fotos-bienes' AND current_rol_nombre() IS DISTINCT FROM 'Consulta');
+USING (bucket_id = 'fotos-bienes')
+WITH CHECK (bucket_id = 'fotos-bienes');
