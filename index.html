@@ -787,13 +787,13 @@ function renderBienes(){
   list.innerHTML = filtrados.map(b => `
     <div class="card">
       ${b.placa_serial ? `<div class="tag">${escapeHtml(b.placa_serial)}</div>` : ''}
-      ${b.foto_url ? `<img src="${escapeHtml(b.foto_url)}" alt="Foto del bien" style="width:100%;height:140px;object-fit:contain;background:#f1f5f9;border-radius:8px 8px 0 0;">` : ''}
       <div class="card-body">
         <div class="card-title">${escapeHtml(b.descripcion)}</div>
         <div class="card-meta">
           📂 ${escapeHtml(b.categorias?.nombre || '—')} &nbsp;·&nbsp;
           📍 ${escapeHtml(b.ubicaciones?.nombre || '—')} &nbsp;·&nbsp;
           Cantidad: ${b.cantidad}
+          ${b.foto_url ? `<br>🖼️ <a href="${escapeHtml(b.foto_url)}" target="_blank" rel="noopener">Ver foto del bien</a>` : ''}
           ${b.acta_compra ? `<br>🧾 Acta de compra: ${escapeHtml(b.acta_compra)}` : ''}
           ${b.proveedor ? `<br>🏢 Proveedor: ${escapeHtml(b.proveedor)}` : ''}
           ${b.comprado_por ? `<br>🙋 Comprado por: ${escapeHtml(b.comprado_por)}` : ''}
